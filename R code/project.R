@@ -1,0 +1,195 @@
+### STAT 6115 Final Project ### -------------------------------------------
+library(xlsx)
+library(glmnet)
+library(gam)
+
+## write dataset to a file in excel format ## ----------------------------
+data = read.table("data for project.txt", header = T)
+attach(data)
+write.xlsx(data, "C:/Users/yusha/Google Drive/courses/data.xlsx")
+
+## find sample correlation ## -------------------------------------------
+corr = cor(data)[1,-1]
+corr
+
+## separate data to training set and test set ## ------------------------
+set.seed(100)
+train = sample(length(V1), length(V1)/2)
+test = - train
+train.data = data[train,]
+test.data = data[test,]
+
+## fit a linear model to data ## ----------------------------------------
+fit1 = lm(V1~., data = train.data)
+summary(fit1)
+
+# perform regression diagnostics for fit1 # ---------------------------------
+AIC(fit1)
+test.error1 = mean((V1 - predict(fit1, data))[test]^2)
+test.error1
+
+par(mfrow = c(2,2))
+plot(fit1)
+
+# refit the model by elminating the insignificant terms # ------------------
+fit2 = lm(V1~V2+V5+V6, data = train.data)
+summary(fit2)
+
+AIC(fit2)
+test.error2 = mean((V1 - predict(fit2, data))[test]^2)
+test.error2
+plot(fit2)
+
+# detect collinearity # ---------------------------------------------
+cor(data)
+
+## apply lasso to do varibale selection and estimate test error ## ------
+x = model.matrix(V1~., data)[,-1]
+y = V1
+
+par(mfrow = c(1,2))
+grid = 10^seq(-10, 10, length = 1000)
+lasso.mod = glmnet(x[train,], y[train], alpha= 1, lambda = grid)
+plot(lasso.mod)
+
+cv.out = cv.glmnet(x[train,], y[train], alpha =1)
+plot(cv.out)
+bestlam = cv.out$lambda.1se
+
+out = glmnet(x,y, alpha =1 , lambda = grid)
+lasso.coef = predict(out, type = "coefficient", s= bestlam)
+lasso.coef
+
+# refit the model using V5, V6 # -------------------------
+fit3 = lm(V1~V5+V6, data = train.data)
+summary(fit3)
+
+# perform regression diagonistic for fit3 # -----------
+AIC(fit3)
+test.error3 = mean((V1 - predict(fit3, data))[test]^2)
+test.error3
+par(mfrow = c(2,2))
+plot(fit3)
+
+# summerize the results of fitting different varibales to linear # -----
+variable = c("V2, V3, V4, V5, V6",  "V2, V5, V6", "V5, V6")
+AIC = c(AIC(fit1), AIC(fit2), AIC(fit3))
+test.error.linear = c( test.error1, test.error2, test.error3)
+table = cbind(variable, AIC, test.error.linear)
+table
+
+## extend to nonlinear model ## -----------------------------------
+
+# perform best subeset selection # ---------------------------------
+library(leaps)
+regfit.full = regsubsets(V1~., train.data)
+reg.summary=summary(regfit.full)
+reg.summary
+
+par(mfrow=c(1,2))
+plot(reg.summary$rss, xlab="Number of Predictors", ylab="Residual Sum of Squares", type="l")
+plot(reg.summary$rsq, xlab="Number of Predictors", ylab="R^2", type="l")
+coef(regfit.full, 2)
+coef(regfit.full, 3)
+ 
+# plots of relationship betweemn each feature and the response # -----
+par(mfrow = c(1,3))
+plot(V1~V2)
+plot(V1~V5)
+plot(V1~V6)
+
+# fit polynomial to V2 # ---------------------------------------------
+library(boot)
+cv.error= rep(NA, 10)
+for (i in 1:10) {
+  fit = glm(V1 ~ poly(V2, i), data = data)
+  cv.error[i] = cv.glm(data, fit, K = 10)$delta[1]
+}
+plot(1:10, cv.error, xlab = "Degree", ylab = "Test MSE", type = "l")
+which.min(cv.error)
+
+# fit polynomial to V5 # ---------------------------------------------
+cv.error= rep(NA, 10)
+for (i in 1:10) {
+  fit = glm(V1 ~ poly(V5, i), data = data)
+  cv.error[i] = cv.glm(data, fit, K = 10)$delta[1]
+}
+plot(1:10, cv.error, xlab = "Degree", ylab = "Test MSE", type = "l")
+which.min(cv.error)
+
+
+# fit polynomial to v6 # ---------------------------------------------
+cv.error = rep(NA, 10)
+for (i in 1:10) {
+  fit = glm(V1 ~ poly(V6, i), data = data)
+  cv.error[i] = cv.glm(data, fit, K = 10)$delta[1]
+}
+plot(1:10, cv.error, xlab = "Degree", ylab = "Test MSE", type = "l")
+which.min(cv.error)
+
+# fit GAM to V2, V5, V6 # --------------------------------------------
+fit4 = gam(V1 ~poly(V2, df = 10) + poly(V5, df = 1) + poly(V6, df = 6), data=train.data)
+summary(fit4)
+
+preds.4 = predict(fit4, test.data)
+test.error4 = mean((test.data$V1 - preds.4)^2)
+test.error4
+
+# fit GAM to V5, V6 # --------------------------------------------------
+fit5 = gam(V1 ~ poly(V5, df = 1) + poly(V6, df = 6), data=train.data)
+summary(fit5)
+
+preds.5 = predict(fit5, test.data)
+test.error5 = mean((test.data$V1 - preds.5)^2)
+test.error5
+
+## try a different way: fit poly to V2, v5, v6 ## ---------------
+
+# fit poly to V2, V5, V6 # -------------------------------
+cv.error.6 = rep(NA, 10)
+for (i in 1:10) {
+  fit = glm(V1 ~ poly(V2, V5, V6, degree = i), data =data)
+  cv.error.6[i] = cv.glm(data, fit, K = 10)$delta[1]
+}
+plot(1:10, cv.error.6, xlab = "Degree", ylab = "Test MSE", type = "l")
+d.min.1 = which.min(cv.error.6)
+test.error.6 = min(cv.error.6)
+test.error.6
+
+fit6 = glm(V1 ~ poly(V2, V5, V6, degree = d.min.1), data = data)
+summary(fit6)
+
+par(mfrow=c(2,2))
+plot(fit6)
+
+# fit poly to V5, V6 # -------------------------------------
+cv.error.7 = rep(NA, 10)
+for (i in 1:10) {
+  fit = glm(V1 ~ poly(V5, V6, degree = i), data = data)
+  cv.error.7[i] = cv.glm(data, fit, K = 10)$delta[1]
+}
+plot(1:10, cv.error.7, xlab = "Degree", ylab = "Test MSE", type = "l")
+d.min.2 = which.min(cv.error.7)
+test.error.7 = min(cv.error.7)
+test.error.7
+
+fit7 = glm(V1~poly(V5, V6, degree = d.min.2), data = data)
+summary(fit7)
+
+par(mfrow=c(2,2))
+plot(fit7)
+
+# summerize the results # --------------------------------
+test.error = c(test.error1, test.error2, test.error3, test.error4, test.error5, test.error.6, test.error.7)
+test.error
+
+# best model # --------------------------------------------
+best.model = glm(V1~poly(V6, degree =3)+ V5+V5:V6, data= data)
+summary(best.model)
+
+par(mfrow=c(2,2))
+plot(best.model)
+
+confint(best.model)
+
+
